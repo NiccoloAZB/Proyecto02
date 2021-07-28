@@ -1,0 +1,315 @@
+---
+title: "Proyecto02"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+# INTEGRANTES
+Column {data-width=100}
+-----------------------------------------------------------------------
+### **Luis Fernando Hernández Guido C03732**
+![](https://images.unsplash.com/photo-1618080606404-4ae39d25067b?ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&ixlib=rb-1.2.1&auto=format&fit=crop&w=750&q=80)
+
+### **María Alejandra González Masís C08978**
+![](https://images.unsplash.com/photo-1585915451006-e9bc8f3cb8ea?ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&ixlib=rb-1.2.1&auto=format&fit=crop&w=1045&q=80)
+
+### **Niccolo Antonio Zúñiga Bogarín C08690**
+![](https://images.unsplash.com/photo-1586799958784-8687bc5d659f?ixlib=rb-1.2.1&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=1050&q=80)
+
+
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(dplyr) 
+library(sf) 
+library(DT) 
+library(plotly) 
+library(leaflet) 
+library(raster) 
+library(ggplot2) 
+library(rgdal)
+library(tidyverse)
+library(leaflet.extras)
+```
+
+```{r carga de datos}
+
+presencia_orquideas <- st_read("https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/gbif/orchidaceae-cr-registros.csv",
+                               options = c(
+                                  "X_POSSIBLE_NAMES=decimalLongitude",
+      "Y_POSSIBLE_NAMES=decimalLatitude"
+    ),
+    quiet = TRUE
+  )
+      
+
+cantones_cr <- st_read("https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/ign/delimitacion-territorial-administrativa/cr_cantones_simp_wgs84.geojson",
+                       quiet = TRUE)
+
+
+provincias_cr <- st_read("https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/ign/delimitacion-territorial-administrativa/cr_provincias_simp_wgs84.geojson",
+                         quiet = TRUE)
+
+
+
+```
+
+```{r}
+sf::st_crs(presencia_orquideas) = 4326
+```
+
+```{r}
+alt <-
+  getData(
+    "worldclim",
+    var = "alt",
+    res = .5,
+    lon = -84,
+    lat = 10
+  )
+
+alt <-
+  alt %>%
+  projectRaster(crs = 4326)
+
+
+altitud <-
+  alt %>%
+  crop(provincias_cr) %>%
+  mask(provincias_cr)
+```
+
+```{r}
+presencia_orquideas <-
+  presencia_orquideas %>%
+  st_join(provincias_cr["provincia"])%>%
+    st_join(cantones_cr["canton"])
+```
+
+```{r}
+presencia_orquideas<- 
+ presencia_orquideas %>% 
+  mutate(coordinateUncertaintyInMeters= as.numeric(coordinateUncertaintyInMeters))%>%
+  mutate(eventDate=as.Date(eventDate,"%Y-%m-%d"))
+
+```
+
+```{r}
+presencia_orquideas <-
+  presencia_orquideas %>%
+ filter(!is.na(coordinateUncertaintyInMeters) & coordinateUncertaintyInMeters <= 1000)
+```
+
+```{r}
+OrquideasS <- presencia_orquideas %>% group_by(species) %>% count(species)
+OrquideasG <- presencia_orquideas %>% group_by(genus) %>% count(genus)
+orquideasT <- nrow(presencia_orquideas)
+```
+
+
+Tablero de control
+=======================================================================
+
+Column {data-width=100}
+-----------------------------------------------------------------------
+
+### Especies
+```{r}
+valueBox(length(unique(presencia_orquideas[["species"]])), icon = "1f331")
+
+```
+
+
+### Géneros
+```{r}
+valueBox(length(unique(presencia_orquideas[["genus"]])), icon = "f06c")
+
+```
+
+
+### Presencia
+```{r}
+valueBox(length(unique(presencia_orquideas[["gbifID"]])), icon = "f041")
+```
+
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+  
+```{r, fig.height=10, fig.width=18}
+
+leaflet() %>% 
+  addProviderTiles(providers$Esri.WorldImagery, group = "Imágenes de ESRI") %>% 
+  addProviderTiles(providers$Stamen.TonerLite, group = "Stamen Toner Lite") %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik, group = "OpenStreetMap") %>%
+  addCircleMarkers(data = presencia_orquideas,
+                   stroke = F,
+                   radius = 2,
+                   fillColor = 'Purple',
+                   fillOpacity = 2,
+                   popup = paste( presencia_orquideas$species, presencia_orquideas$gbifID, presencia_orquideas$genus, sep = '<br/>')) %>%
+  addLayersControl(baseGroups = c("OpenStreetMap", "Stamen Toner Lite", "Imágenes de ESRI")) %>%
+  addMiniMap(
+    toggleDisplay = TRUE,
+    width = 250,
+  height = 250,
+  position = "bottomleft",
+    tiles = providers$Stamen.TonerLite
+  )
+```
+
+Registros
+=======================================================================
+
+
+```{r}
+presencia_orquideas %>%
+  sf::st_drop_geometry() %>%
+  dplyr::select(species, provincia, canton, eventDate) %>%
+  datatable(colnames = c(
+                         "Especie",
+                         "Provincia",
+                         "Cantón",
+                         "Fecha"),
+options = list(searchHighlight = TRUE,
+                   language = list(url = '//cdn.datatables.net/plug-ins/1.10.25/i18n/Spanish.json'))
+)
+
+```
+Grafico pastel
+=======================================================================
+
+```  {r}
+orquideaspastel <- 
+  OrquideasS %>% 
+  filter(!is.na(species), species != "") %>% 
+  arrange(desc(n))
+
+orquideaspastel2 <- OrquideasS %>%
+  sf::st_drop_geometry() %>% 
+  filter(is.na(species)| species == "")
+orquideaspastel2$species <- "Otras"
+orquideas10 <- orquideaspastel %>% slice(1:10)
+orquideaspastel3 <- orquideaspastel %>%
+  sf::st_drop_geometry() %>%
+  slice(11:n()) %>% merge(orquideaspastel2, all = TRUE) %>% summarize(n = sum(n), species="Otras")
+
+top <- merge(orquideas10, orquideaspastel3, all = TRUE)
+
+Graficoorquideas<- data.frame("categorie"= rownames(top), top)
+datos<-Graficoorquideas[, c("categorie", "species", "n")] 
+
+plot_ly(
+  datos,
+  labels= ~species,
+  values= ~n,
+  type = "pie"
+)%>%
+  layout(
+    title="Registros por especie y Porcentaje",
+    xaxis= list(
+      showgried= FALSE,
+      zeroline= FALSE, 
+      showticklabels= FALSE
+    ),
+    yaxis= list(
+      showgried= FALSE,
+      zeroline=FALSE,
+      showticklabels= FALSE)
+  )
+```
+
+
+Mapa leaflet
+=======================================================================
+
+```{r}
+presencia_orquideas$species[presencia_orquideas$species == ""] <- "Otras"
+
+especies <-
+  presencia_orquideas %>%
+  group_by(provincia) %>%
+  summarize(especies = n())
+
+col_espe <-
+  colorNumeric(
+    palette = "Purp",
+    domain = especies$especies,
+    na.color = "transparent"
+  )
+
+rasterP <-
+  altitud %>%
+  aggregate(fact = 12)
+
+RE <-
+  rasterize(presencia_orquideas,
+            rasterP,
+            field = 1,
+            fun = "count")
+
+# Paleta de colores para celdas
+cOl_ras <-
+  colorNumeric(
+    c("#5E00FF", "#7D32FF", "#9152FF", "#A775FF", "#BC96FF", "#D3BAFF"),
+    values(RE), 
+    na.color = "transparent"
+)
+
+# Mapa Leaflet
+leaflet() %>%
+  addTiles(group = "OSM") %>%
+  addCircleMarkers(
+    data = presencia_orquideas,
+    stroke = F,
+    radius = 4,
+    fillColor = "#FE54FF",
+    fillOpacity = 1,
+    popup = paste(
+      paste(
+        "Provincia:",
+        presencia_orquideas$provincia
+      ),
+      paste(
+        "Especies:",
+        presencia_orquideas$species
+      ),
+      paste(
+        "Cantón:",
+        presencia_orquideas$canton
+      ),
+      paste(
+        "Fecha:",
+        presencia_orquideas$eventDate
+      ),
+      sep = ''
+    ),
+    clusterOptions = markerClusterOptions(),
+    group = "Clustered"
+  ) %>%
+    addRasterImage(
+    RE,
+    colors = cOl_ras,
+    opacity = 1,
+    group = "Celdas"
+  ) %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik, group = "OpenStreetMap") %>%
+  addProviderTiles(providers$Stamen.TonerLite, group = "Stamen Toner Lite") %>%
+  addProviderTiles(providers$Esri.WorldImagery, group = "Imágenes de ESRI") %>%
+  addLayersControl(
+    baseGroups = c("OpenStreetMap", "Stamen Toner Lite", "Imágenes de ESRI"),
+    overlayGroups = c("Clustered", "Celdas")
+  ) %>%
+  addLegend(
+    pal = cOl_ras,
+    values = values(RE),
+    position = "bottomleft",
+    title = "Cantidad de Especies",
+    group = "Registros-Orquideas"
+  )
+```
+
+
+
